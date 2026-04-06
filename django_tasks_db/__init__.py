@@ -7,6 +7,6 @@ import importlib.metadata
 
 __version__ = importlib.metadata.version(__name__)
 
-from .backend import DatabaseBackend
+from .backend import DatabaseBackend, ZMQDatabaseBackend
 
-__all__ = ["DatabaseBackend"]
+__all__ = ["DatabaseBackend", "ZMQDatabaseBackend"]

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from django import VERSION
 from django.apps import apps
+from django.conf import settings
 from django.core import checks
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.db.models import Expression
@@ -159,3 +160,68 @@ class DatabaseBackend(BaseTaskBackend):
                 f"{backend_name} configured as django_tasks_db backend, but database app not installed",
                 "Insert 'django_tasks_db' in INSTALLED_APPS",
             )
+
+
+class ZMQDatabaseBackend(DatabaseBackend):
+    def __init__(self, alias: str, params: dict) -> None:
+        try:
+            import zmq as _zmq
+            import zmq.asyncio as _azmq
+        except ModuleNotFoundError as e:
+            if e.name != "zmq":
+                raise
+            raise ImproperlyConfigured(
+                "ZMQDatabaseBackend requires optional dependency 'pyzmq'. "
+                "Install it with 'pip install django-tasks-db[pyzmq]'."
+            ) from e
+
+        self.zmq = _zmq
+        self.azmq = _azmq
+
+        super().__init__(alias, params)
+
+    def _enqueue(self, task_id):
+        context = self.zmq.Context.instance()
+        socket = context.socket(self.zmq.PUSH)
+        with context, socket:
+            socket.connect(getattr(settings, "ZMQ_BROKER_URL", "tcp://127.0.0.1:5555"))
+            socket.send_string(str(task_id))
+
+    async def _aenqueue(self, task_id):
+        context = self.azmq.Context.instance()
+        socket = context.socket(self.zmq.PUSH)
+        with context, socket:
+            socket.connect(getattr(settings, "ZMQ_BROKER_URL", "tcp://127.0.0.1:5555"))
+            await socket.send_string(str(task_id))
+
+    def enqueue(
+        self,
+        task: Task[P, T],
+        args: P.args,  # type:ignore[valid-type]
+        kwargs: P.kwargs,  # type:ignore[valid-type]
+    ) -> TaskResult[T]:
+        self.validate_task(task)
+
+        db_result = self._task_to_db_task(task, args, kwargs)
+
+        self._enqueue(db_result.id)
+
+        task_enqueued.send(type(self), task_result=db_result.task_result)
+
+        return db_result.task_result
+
+    async def aenqueue(
+        self,
+        task: Task[P, T],
+        args: P.args,  # type:ignore[valid-type]
+        kwargs: P.kwargs,  # type:ignore[valid-type]
+    ) -> TaskResult[T]:
+        self.validate_task(task)
+
+        db_result = await self._atask_to_db_task(task, args, kwargs)
+
+        await self._aenqueue(db_result.id)
+
+        await self._asend_task_enqueued_signal(db_result.task_result)
+
+        return db_result.task_result

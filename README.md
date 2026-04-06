@@ -15,6 +15,12 @@ A [Django Tasks](https://docs.djangoproject.com/en/stable/topics/tasks/) backend
 python -m pip install django-tasks-db
 ```
 
+To support optional zmq based backend:
+
+```shell
+python -m pip install django-tasks-db[pyzmq]
+```
+
 First, add `django_tasks_db` to your `INSTALLED_APPS`:
 
 ```python
